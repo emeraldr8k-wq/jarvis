@@ -1,6 +1,7 @@
 """Разбор команды (уже без wake-слова) и выбор действия."""
 
 import datetime
+import json
 import logging
 import random
 import re
@@ -132,9 +133,14 @@ class IntentHandler:
         self.steam_games = scan_steam_games()
         self.music_app = config.get("music_app", "яндекс музыка")
         self.music_wait = float(config.get("music_wait_sec", 6))
-        self.last_file = None    # последний созданный файл — для «открой его»
+        self.last_file = None  # последний созданный файл — для «открой его»
         self.last_folder = None  # последняя папка — для «что в ней»
-        self.dialog = deque(maxlen=12)  # история диалога для LLM
+
+        # Память диалога: 20 сообщений = 10 пар (user + assistant)
+        self.dialog = deque(maxlen=20)
+        self._dialog_path = Path(__file__).resolve().parent.parent / "dialog.json"
+        self._load_dialog()
+
         self.last_was_chat = False
         self.custom = []
         for entry in config.get("custom_commands", []):
@@ -142,6 +148,38 @@ class IntentHandler:
             action = entry.get("action", "").strip() or entry.get("steps")
             if phrases and action:
                 self.custom.append((phrases, action, entry.get("reply", "Выполняю.")))
+
+    def _load_dialog(self):
+        """Восстанавливает историю диалога из dialog.json при старте."""
+        if not self._dialog_path.exists():
+            return
+        try:
+            data = json.loads(self._dialog_path.read_text(encoding="utf-8"))
+            if isinstance(data, list):
+                self.dialog.extend(data[-self.dialog.maxlen:])
+                log.info("История диалога загружена: %d сообщений", len(self.dialog))
+        except Exception:
+            log.exception("Не удалось загрузить dialog.json")
+
+    def save_dialog(self):
+        """Сохраняет историю диалога на диск (вызывается при выходе)."""
+        try:
+            self._dialog_path.write_text(
+                json.dumps(list(self.dialog), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            log.info("История диалога сохранена: %d сообщений", len(self.dialog))
+        except Exception:
+            log.exception("Не удалось сохранить dialog.json")
+
+    def clear_dialog(self):
+        """Полностью очищает память диалога (и файл, и буфер в памяти)."""
+        self.dialog.clear()
+        try:
+            self._dialog_path.unlink(missing_ok=True)
+        except Exception:
+            log.exception("Не удалось удалить dialog.json")
+        log.info("История диалога очищена")
 
     # --- цепочки: «сделай скриншот и открой его» -------------------------
 

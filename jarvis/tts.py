@@ -98,8 +98,22 @@ class Speaker:
         hf_hub_download(PIPER_REPO, rel + ".json")
         self._piper = PiperVoice.load(onnx)
         self._piper_cfg = SynthesisConfig(length_scale=round(1.0 / self.rate, 2))
+        self._current_voice = voice
         self._mode = "piper"
         log.info("TTS: piper, голос %s, скорость %.2f", voice, self.rate)
+
+    def reload_voice(self, new_voice: str) -> bool:
+        """Меняет голос Piper на лету. Возвращает True при успехе."""
+        if self._mode != "piper":
+            log.warning("Смена голоса невозможна: текущий режим %s (а не piper)", self._mode)
+            return False
+        try:
+            self._init_piper(new_voice)
+            log.info("Голос изменён на %s", new_voice)
+            return True
+        except Exception:
+            log.exception("Не удалось загрузить голос %s", new_voice)
+            return False
 
     def _speak_piper(self, text: str) -> None:
         buf = io.BytesIO()

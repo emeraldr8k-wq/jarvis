@@ -102,8 +102,11 @@ class Brain:
         """Разговорный ответ с учётом истории диалога (озвучивается как есть)."""
         if not self.available:
             return None
+        # 10 пар истории (20 сообщений) + system + текущий вопрос.
+        # deque(maxlen=20) в IntentHandler уже обрезает старьё, но [-20:]
+        # оставлен как страховка на случай, если история пришла из другого места.
         msgs = ([{"role": "system", "content": CHAT_SYSTEM}]
-                + list(history or [])[-10:]
+                + list(history or [])[-20:]
                 + [{"role": "user", "content": cmd}])
         try:
             t0 = time.time()
@@ -123,6 +126,44 @@ class Brain:
         except Exception:
             log.exception("Прогрев LLM не удался")
             self.available = False
+
+    def reload_model(self, new_model: str) -> bool:
+        """Переключает модель Ollama на лету. Возвращает True при успехе."""
+        new_model = (new_model or "").strip()
+        if not new_model:
+            return False
+        if new_model == self.model and self.available:
+            return True
+
+        # Проверяем, что модель реально установлена в Ollama
+        try:
+            import urllib.request
+            with urllib.request.urlopen(self.url + "/api/tags", timeout=3) as r:
+                data = json.loads(r.read())
+            available = {m["name"] for m in data.get("models", [])}
+            if new_model not in available:
+                log.error("Модель %r не найдена в Ollama. Доступны: %s",
+                          new_model, sorted(available))
+                return False
+        except Exception:
+            log.warning("Не удалось проверить список моделей — пробую всё равно")
+
+        old = self.model
+        self.model = new_model
+        log.info("LLM-модель изменена: %s -> %s", old, new_model)
+
+        # Прогрев новой модели в фоне: первый запрос к Ollama займёт 10-60 сек
+        def _warmup_new():
+            try:
+                t0 = time.time()
+                self._chat("привет", timeout=120)
+                self.available = True
+                log.info("Модель %s прогрета за %.1f с", new_model, time.time() - t0)
+            except Exception:
+                log.exception("Прогрев модели %s не удался", new_model)
+
+        threading.Thread(target=_warmup_new, daemon=True, name="brain-reload-warmup").start()
+        return True
 
     def parse(self, cmd: str) -> dict | None:
         """Интент {'action': ..., ...} или None, если LLM недоступна/невалидна."""

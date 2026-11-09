@@ -51,3 +51,23 @@ class PhoenixWorker:
                     self.process_command_async(cmd, is_voice=True)
         except Exception as e:
             log.exception("Критическая ошибка в аудиопотоке: %s", e)
+
+    def reload_voice(self, voice: str) -> bool:
+        """Перезагружает голос TTS без перезапуска приложения."""
+        return self.jarvis.speaker.reload_voice(voice)
+
+    def reload_model(self, model: str) -> bool:
+        """Переключает модель Ollama без перезапуска приложения."""
+        brain = getattr(self.jarvis.handler, "brain", None)
+        if brain is None:
+            log.warning("LLM не подключена — смена модели недоступна")
+            return False
+        return brain.reload_model(model)
+
+    def clear_dialog(self):
+        """Очищает историю диалога (для пункта меню в трее)."""
+        try:
+            self.jarvis.handler.clear_dialog()
+            self.gui_queue.put(("Система", "История диалога очищена."))
+        except Exception:
+            log.exception("Не удалось очистить историю")

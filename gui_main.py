@@ -34,38 +34,56 @@ def main():
     # 3. Инициализация логического Воркера
     worker = PhoenixWorker(jarvis, gui_queue)
 
-    # 4. Инициализация Графического окна (передаем воркер в качестве обработчика)
+    # 4. Инициализация Графического окна
     app = PhoenixGUI(
         jarvis,
         BASE_DIR / "config.json",
         on_command_cb=worker.process_command_async,
         on_mic_toggle_cb=worker.set_listening,
+        on_voice_change_cb=worker.reload_voice,
+        on_model_change_cb=worker.reload_model,
     )
 
-    # --- Трей ---
+    # 5. Трей (в отдельном daemon-потоке, не блокирует mainloop)
     tray = None
     try:
-        tray = build_tray(jarvis, on_quit=lambda: app.after(0, app.destroy))
-        tray.run_detached()  # не блокирует главный поток
+        tray = build_tray(
+            jarvis,
+            on_quit=lambda: app.after(0, app.destroy),
+            on_clear_dialog=worker.clear_dialog,
+        )
+        tray.run_detached()
     except Exception:
         logging.getLogger("jarvis").exception("Не удалось создать иконку в трее")
 
-    # 5. Запуск фоновых задач микрофона и старт приложения
+    # 6. Фоновые задачи + приветствие + главный цикл
     worker.start_background_tasks()
     jarvis.say("Феникс запущен и готов к работе.")
 
-    app.mainloop()
-    jarvis.shutdown()
+    try:
+        app.mainloop()
+    finally:
+        # Сохраняем историю диалога на диск перед выходом
+        try:
+            jarvis.handler.save_dialog()
+        except Exception:
+            logging.getLogger("jarvis").exception("Не удалось сохранить историю диалога")
+        # Корректно гасим трей
+        if tray is not None:
+            try:
+                tray.stop()
+            except Exception:
+                pass
+        jarvis.shutdown()
 
 
 if __name__ == "__main__":
-    if __name__ == "__main__":
-        import traceback
-        from pathlib import Path
+    import traceback
+    from pathlib import Path
 
-        try:
-            main()
-        except Exception:
-            crash = Path(__file__).resolve().parent / "crash.log"
-            crash.write_text(traceback.format_exc(), encoding="utf-8")
-            raise
+    try:
+        main()
+    except Exception:
+        crash = Path(__file__).resolve().parent / "crash.log"
+        crash.write_text(traceback.format_exc(), encoding="utf-8")
+        raise

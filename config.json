@@ -26,7 +26,7 @@
   "whisper_model": "none",
   "whisper_device": "auto",
   "use_llm": true,
-  "llm_model": "qwen2.5:1.5b",
+  "llm_model": "qwen2.5:3b",
   "ollama_url": "http://127.0.0.1:11434",
   "app_paths": {},
   "custom_commands": [

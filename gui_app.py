@@ -8,12 +8,16 @@ gui_queue = queue.Queue()
 
 
 class PhoenixGUI(ctk.CTk):
-    def __init__(self, jarvis_instance, config_path, on_command_cb, on_mic_toggle_cb=None):
+    def __init__(self, jarvis_instance, config_path, on_command_cb,
+                 on_mic_toggle_cb=None, on_voice_change_cb=None,
+                 on_model_change_cb=None):
         super().__init__()
         self.jarvis = jarvis_instance
         self.config_path = config_path
         self.on_command_cb = on_command_cb
         self.on_mic_toggle_cb = on_mic_toggle_cb
+        self.on_voice_change_cb = on_voice_change_cb
+        self.on_model_change_cb = on_model_change_cb
 
         self._settings_win = None
 
@@ -37,7 +41,6 @@ class PhoenixGUI(ctk.CTk):
         self.geometry(f"{w}x{h}+{x}+{y}")
 
     def _build_ui(self):
-        # --- верхняя панель: индикатор + статус + свитч + шестерёнка ---
         top = ctk.CTkFrame(self, fg_color="transparent")
         top.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 5))
         top.grid_columnconfigure(1, weight=1)
@@ -79,7 +82,6 @@ class PhoenixGUI(ctk.CTk):
         self.chat_log.insert("0.0", "Феникс активен.\nСлушаю ваши инструкции...\n")
         self.chat_log.configure(state="disabled")
 
-        # --- поле ввода ---
         self.entry = ctk.CTkEntry(
             self, height=45, corner_radius=10,
             placeholder_text="Напишите команду и нажмите Enter...",
@@ -157,11 +159,19 @@ class PhoenixGUI(ctk.CTk):
         if self.current_config.get("use_whisper", False):
             whisper_switch.select()
         whisper_switch.pack(anchor="w", padx=20, pady=15)
+        old_model = self.current_config.get("llm_model", "qwen2.5:1.5b")
+        old_voice = self.current_config.get("tts_voice", "ruslan")
 
         def save_and_close():
-            self.current_config["llm_model"] = model_menu.get().strip()
-            self.current_config["tts_voice"] = voice_menu.get().strip()
+            new_model = model_menu.get().strip()
+            new_voice = voice_menu.get().strip()
+            model_changed = (new_model != old_model)
+            voice_changed = (new_voice != old_voice)
+
+            self.current_config["llm_model"] = new_model
+            self.current_config["tts_voice"] = new_voice
             self.current_config["use_whisper"] = bool(whisper_switch.get())
+
             try:
                 with open(self.config_path, "w", encoding="utf-8") as f:
                     json.dump(self.current_config, f, indent=2, ensure_ascii=False)
@@ -169,7 +179,14 @@ class PhoenixGUI(ctk.CTk):
             except Exception as e:
                 self.status_label.configure(text=f"Ошибка: {e}")
                 return
+
             self._close_settings()
+
+            if model_changed or voice_changed:
+                self._apply_settings_changes(
+                    new_model if model_changed else None,
+                    new_voice if voice_changed else None,
+                )
 
         btn_frame = ctk.CTkFrame(win, fg_color="transparent")
         btn_frame.pack(pady=10)
@@ -201,10 +218,15 @@ class PhoenixGUI(ctk.CTk):
             self.append_to_log("Вы", text)
             self.entry.delete(0, "end")
             self.status_label.configure(text="Феникс думает...")
-            self.indicator.configure(fg_color="#ff9000")
+            self.indicator.configure(
+                fg_color="#ff9000",
+                border_color="#ff0500"
+            )
             self.on_command_cb(text)
 
     def check_queue(self):
+        # Статус и цвет обновляются ТОЛЬКО когда реально пришёл ответ из очереди.
+        # Если очередь пуста — ничего не трогаем, чтобы не сбить «Феникс думает...».
         try:
             while True:
                 sender, text = gui_queue.get_nowait()
@@ -274,3 +296,45 @@ class PhoenixGUI(ctk.CTk):
         model_menu.configure(values=models)
         model_menu.set(current if current in models else models[0])
         self.status_label.configure(text=f"Найдено моделей: {len(models)}")
+
+    def _apply_settings_changes(self, new_model, new_voice):
+        """Применяет новую модель/голос в фоне, показывает прогресс."""
+        parts = []
+        if new_model: parts.append(f"модель {new_model}")
+        if new_voice: parts.append(f"голос {new_voice}")
+        self.status_label.configure(text=f"Применяю: {', '.join(parts)}...")
+        self.indicator.configure(
+            fg_color="#ff9000",
+            border_color="#ff0500"
+        )
+
+        import threading
+        results = {}
+
+        def _worker():
+            if new_voice and self.on_voice_change_cb:
+                try:
+                    results["voice"] = self.on_voice_change_cb(new_voice)
+                except Exception:
+                    results["voice"] = False
+            if new_model and self.on_model_change_cb:
+                try:
+                    results["model"] = self.on_model_change_cb(new_model)
+                except Exception:
+                    results["model"] = False
+
+            def _report():
+                msgs = []
+                if "voice" in results:
+                    msgs.append(f"Голос {'установлен' if results['voice'] else 'не установлен'}")
+                if "model" in results:
+                    msgs.append(f"Модель {'установлена' if results['model'] else 'не установлен'}")
+                self.status_label.configure(text=", ".join(msgs) if msgs else "Готово")
+                if self.mic_switch.get():
+                    self.indicator.configure(fg_color="#1f538d", border_color="#00d2ff")
+                else:
+                    self.indicator.configure(fg_color="#333333", border_color="#666666")
+
+            self.after(0, _report)
+
+        threading.Thread(target=_worker, daemon=True).start()

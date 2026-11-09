@@ -21,10 +21,17 @@ def _make_icon_image() -> Image.Image:
     return img
 
 
-def build_tray(jarvis, on_quit=None) -> pystray.Icon:
+def build_tray(jarvis, on_quit=None, on_clear_dialog=None) -> pystray.Icon:
     def on_toggle(icon, item):
         jarvis.listening_enabled = not jarvis.listening_enabled
         log.info("Прослушивание: %s", jarvis.listening_enabled)
+
+    def on_clear(icon, item):
+        if on_clear_dialog is not None:
+            try:
+                on_clear_dialog()
+            except Exception:
+                log.exception("Ошибка очистки диалога")
 
     def on_screenshot(icon, item):
         actions.take_screenshot()
@@ -49,6 +56,7 @@ def build_tray(jarvis, on_quit=None) -> pystray.Icon:
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Слушать микрофон", on_toggle,
                          checked=lambda item: jarvis.listening_enabled),
+        pystray.MenuItem("Очистить диалог", on_clear),
         pystray.MenuItem("Сделать скриншот", on_screenshot),
         pystray.MenuItem("Открыть конфиг", on_config),
         pystray.MenuItem("Открыть журнал", on_log),
