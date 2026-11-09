@@ -14,6 +14,18 @@ class PhoenixWorker:
         """Запуск фонового потока для прослушивания микрофона Vosk"""
         threading.Thread(target=self._voice_listener_loop, daemon=True, name="voice-stt").start()
 
+    def set_listening(self, enabled: bool):
+        """Включает/выключает обработку голосовых команд (поток Vosk остаётся жив)."""
+        self.jarvis.listening_enabled = enabled
+        log.info("Микрофон %s", "включён" if enabled else "выключен")
+        if not enabled:
+            # Сбрасываем накопленный буфер, чтобы при включении
+            # не сработала фраза, произнесённая в «выключенном» состоянии
+            try:
+                self.jarvis.listener.flush()
+            except Exception:
+                log.exception("Не удалось сбросить буфер микрофона")
+
     def process_command_async(self, text: str, is_voice: bool = False):
         """Запуск обработки команды в отдельном потоке, чтобы GUI не зависал"""
         if not is_voice:
@@ -31,6 +43,8 @@ class PhoenixWorker:
     def _voice_listener_loop(self):
         try:
             for phrase, audio in self.jarvis.listener.phrases(self.jarvis.stop_event):
+                if not self.jarvis.listening_enabled:
+                    continue
                 cmd = self.jarvis._extract_command(phrase.lower())
                 if cmd:
                     self.gui_queue.put(("Вы (Голос)", cmd))

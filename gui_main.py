@@ -6,6 +6,7 @@ from jarvis.tts import Speaker
 from jarvis.intents import IntentHandler
 from jarvis.apps import build_apps
 from jarvis.main import Jarvis, BASE_DIR, setup_logging
+from jarvis.tray import build_tray
 
 # Импортируем наши новые раздельные модули
 from gui_app import PhoenixGUI, gui_queue
@@ -34,7 +35,20 @@ def main():
     worker = PhoenixWorker(jarvis, gui_queue)
 
     # 4. Инициализация Графического окна (передаем воркер в качестве обработчика)
-    app = PhoenixGUI(jarvis, BASE_DIR / "config.json", on_command_cb=worker.process_command_async)
+    app = PhoenixGUI(
+        jarvis,
+        BASE_DIR / "config.json",
+        on_command_cb=worker.process_command_async,
+        on_mic_toggle_cb=worker.set_listening,
+    )
+
+    # --- Трей ---
+    tray = None
+    try:
+        tray = build_tray(jarvis, on_quit=lambda: app.after(0, app.destroy))
+        tray.run_detached()  # не блокирует главный поток
+    except Exception:
+        logging.getLogger("jarvis").exception("Не удалось создать иконку в трее")
 
     # 5. Запуск фоновых задач микрофона и старт приложения
     worker.start_background_tasks()
@@ -45,4 +59,13 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    if __name__ == "__main__":
+        import traceback
+        from pathlib import Path
+
+        try:
+            main()
+        except Exception:
+            crash = Path(__file__).resolve().parent / "crash.log"
+            crash.write_text(traceback.format_exc(), encoding="utf-8")
+            raise

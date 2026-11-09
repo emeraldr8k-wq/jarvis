@@ -8,105 +8,87 @@ gui_queue = queue.Queue()
 
 
 class PhoenixGUI(ctk.CTk):
-    def __init__(self, jarvis_instance, config_path, on_command_cb):
+    def __init__(self, jarvis_instance, config_path, on_command_cb, on_mic_toggle_cb=None):
         super().__init__()
         self.jarvis = jarvis_instance
         self.config_path = config_path
-        self.on_command_cb = on_command_cb  # Коллбэк для отправки команд в логику
+        self.on_command_cb = on_command_cb
+        self.on_mic_toggle_cb = on_mic_toggle_cb
 
-        # Настройки главного окна
-        self.title("Phoenix v1.0")
-        self.geometry("780x570")
+        self._settings_win = None
+
+        self.title("Phoenix")
         self.resizable(False, False)
+        self._center_window(420, 650)
 
         self.grid_columnconfigure(0, weight=1)
-        self.grid_columnconfigure(1, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
-        self._build_left_panel()
-        self._build_right_panel()
+        self.load_current_config()
+        self._build_ui()
 
-        self.refresh_log_view()
         self.after(100, self.check_queue)
+        self.after(500, self._sync_mic_state)
 
-    def _build_left_panel(self):
-        """Отрисовка левой панели ассистента"""
-        self.left_frame = ctk.CTkFrame(self, width=380, fg_color="transparent")
-        self.left_frame.grid(row=0, column=0, padx=15, pady=15, sticky="nsew")
+    def _center_window(self, w, h):
+        self.update_idletasks()
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        x, y = (sw - w) // 2, (sh - h) // 2
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _build_ui(self):
+        # --- верхняя панель: индикатор + статус + свитч + шестерёнка ---
+        top = ctk.CTkFrame(self, fg_color="transparent")
+        top.grid(row=0, column=0, sticky="ew", padx=15, pady=(15, 5))
+        top.grid_columnconfigure(1, weight=1)
 
         self.indicator = ctk.CTkButton(
-            self.left_frame, text="", width=60, height=60, corner_radius=30,
-            fg_color="#1f538d", hover_color="#2e7fd6", border_width=4, border_color="#00d2ff"
+            top, text="", width=50, height=50, corner_radius=25,
+            fg_color="#1f538d", hover_color="#2e7fd6",
+            border_width=3, border_color="#00d2ff",
         )
-        self.indicator.pack(pady=20)
+        self.indicator.grid(row=0, column=0, rowspan=2, padx=(0, 12))
 
         self.status_label = ctk.CTkLabel(
-            self.left_frame, text="Система готова к работе, сэр",
-            font=("Segoe UI", 16, "bold"), text_color="#00d2ff"
+            top, text="Система готова",
+            font=("Segoe UI", 14, "bold"),
+            text_color="#00d2ff", anchor="w",
         )
-        self.status_label.pack(pady=5)
+        self.status_label.grid(row=0, column=1, sticky="w")
+
+        self.mic_switch = ctk.CTkSwitch(
+            top, text="Микрофон", command=self._toggle_mic,
+            font=("Segoe UI", 11),
+        )
+        if getattr(self.jarvis, "listening_enabled", True):
+            self.mic_switch.select()
+        self.mic_switch.grid(row=1, column=1, sticky="w", pady=(2, 0))
+
+        self.settings_btn = ctk.CTkButton(
+            top, text="⚙", width=40, height=40, corner_radius=20,
+            font=("Segoe UI Emoji", 20),
+            fg_color="#2a2d2e", hover_color="#3a3d3e",
+            command=self._open_settings,
+        )
+        self.settings_btn.grid(row=0, column=2, rowspan=2, padx=(8, 0))
 
         self.chat_log = ctk.CTkTextbox(
-            self.left_frame, width=350, height=240, font=("Segoe UI", 13), corner_radius=10
+            self, font=("Segoe UI", 13), corner_radius=10, wrap="word",
         )
-        self.chat_log.pack(pady=15)
+        self.chat_log.grid(row=1, column=0, padx=15, pady=10, sticky="nsew")
         self.chat_log.insert("0.0", "Феникс активен.\nСлушаю ваши инструкции...\n")
         self.chat_log.configure(state="disabled")
 
+        # --- поле ввода ---
         self.entry = ctk.CTkEntry(
-            self.left_frame, width=350, height=40,
-            placeholder_text="Напишите команду здесь и нажмите Enter...", corner_radius=10
+            self, height=45, corner_radius=10,
+            placeholder_text="Напишите команду и нажмите Enter...",
         )
-        self.entry.pack(pady=5)
+        self.entry.grid(row=2, column=0, padx=15, pady=(0, 15), sticky="ew")
         self.entry.bind("<Return>", self.send_text_command)
 
-    def _build_right_panel(self):
-        """Отрисовка правой панели настроек и журнала"""
-        self.right_frame = ctk.CTkTabview(self, width=360, height=520)
-        self.right_frame.grid(row=0, column=1, padx=15, pady=15, sticky="nsew")
-
-        self.tab_config = self.right_frame.add("🔧 Настройки")
-        self.tab_log = self.right_frame.add("📋 Журнал (Лог)")
-
-        # Настройки
-        self.load_current_config()
-        ctk.CTkLabel(self.tab_config, text="Модель ИИ (Ollama):", font=("Segoe UI", 12, "bold")).pack(anchor="w",
-                                                                                                      padx=10, pady=5)
-        self.model_entry = ctk.CTkEntry(self.tab_config, width=320)
-        self.model_entry.insert(0, self.current_config.get("llm_model", "qwen2.5:1.5b"))
-        self.model_entry.pack(padx=10, pady=2)
-
-        ctk.CTkLabel(self.tab_config, text="Голос ассистента (TTS):", font=("Segoe UI", 12, "bold")).pack(anchor="w",
-                                                                                                          padx=10,
-                                                                                                          pady=5)
-        self.voice_entry = ctk.CTkEntry(self.tab_config, width=320)
-        self.voice_entry.insert(0, self.current_config.get("tts_voice", "ruslan"))
-        self.voice_entry.pack(padx=10, pady=2)
-
-        self.whisper_switch = ctk.CTkSwitch(self.tab_config, text="Включить Whisper")
-        if self.current_config.get("use_whisper", False):
-            self.whisper_switch.select()
-        self.whisper_switch.pack(anchor="w", padx=15, pady=5)
-
-        self.save_btn = ctk.CTkButton(self.tab_config, text="Сохранить и применить", command=self.save_config_file,
-                                      fg_color="#2b7337", hover_color="#399648")
-        self.save_btn.pack(pady=30)
-
-        # Журнал
-        self.log_view = ctk.CTkTextbox(
-            self.tab_log, width=340, height=400,
-            font=("Consolas", 11), corner_radius=5,
-            state="disabled"  # только для чтения, но выделение мышью работает
-        )
-        self.log_view.pack(padx=5, pady=5)
-
-        # Ручная обработка копирования и выделения всего
-        self.log_view.bind("<Control-c>", self._copy_log_selection)
-        self.log_view.bind("<Control-a>", self._select_all_log)
-
-        self.refresh_log_btn = ctk.CTkButton(self.tab_log, text="Обновить журнал", command=self.refresh_log_view)
-        self.refresh_log_btn.pack(pady=5)
-
     def load_current_config(self):
+        self.current_config = {}
         if os.path.exists(self.config_path):
             try:
                 with open(self.config_path, "r", encoding="utf-8") as f:
@@ -114,57 +96,112 @@ class PhoenixGUI(ctk.CTk):
             except Exception:
                 self.current_config = {}
 
-    def save_config_file(self):
-        self.current_config["llm_model"] = self.model_entry.get().strip()
-        self.current_config["tts_voice"] = self.voice_entry.get().strip()
-        self.current_config["use_whisper"] = bool(self.whisper_switch.get())
-        try:
-            with open(self.config_path, "w", encoding="utf-8") as f:
-                json.dump(self.current_config, f, indent=2, ensure_ascii=False)
-            self.status_label.configure(text="Настройки сохранены! Перезапустите ИИ.")
-        except Exception as e:
-            self.status_label.configure(text=f"Ошибка сохранения: {e}")
-
-    def refresh_log_view(self):
-        # Если пользователь выделил текст — не обновляем, чтобы не сбить выделение
-        try:
-            if self.log_view.tag_ranges("sel"):
-                return
-        except Exception:
-            pass
-
-        log_file_path = os.path.join(os.path.dirname(self.config_path), "jarvis.log")
-
-        # Временно включаем редактирование, чтобы обновить содержимое
-        self.log_view.configure(state="normal")
-        self.log_view.delete("0.0", "end")
-
-        if os.path.exists(log_file_path):
+    def _open_settings(self):
+        if self._settings_win is not None:
             try:
-                with open(log_file_path, "r", encoding="utf-8") as f:
-                    self.log_view.insert("0.0", "".join(f.readlines()[-40:]))
+                if self._settings_win.winfo_exists():
+                    self._settings_win.lift()
+                    self._settings_win.focus()
+                    return
+            except Exception:
+                pass
+
+        win = ctk.CTkToplevel(self)
+        win.title("Настройки")
+        win.resizable(False, False)
+        win.transient(self)
+        win.grab_set()
+
+        self.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - 340) // 2
+        y = self.winfo_y() + (self.winfo_height() - 380) // 2
+        win.geometry(f"340x380+{x}+{y}")
+        win.after(50, win.lift)
+        self._settings_win = win
+
+        model_label = ctk.CTkLabel(win, text="Модель ИИ (Ollama):",
+                                   font=("Segoe UI", 12, "bold"))
+        model_label.pack(anchor="w", padx=15, pady=(15, 5))
+
+        models = self._get_ollama_models()
+        current_model = self.current_config.get("llm_model", "qwen2.5:1.5b")
+        if current_model not in models:
+            models.insert(0, current_model)
+        if not models:
+            models = [current_model]
+
+        model_menu = ctk.CTkOptionMenu(win, values=models, width=310)
+        model_menu.set(current_model)
+        model_menu.pack(padx=15, pady=2)
+
+        refresh_btn = ctk.CTkButton(
+            win, text="↻ Обновить список моделей",
+            command=lambda: self._refresh_models(model_menu),
+            fg_color="#444", hover_color="#555", height=26, width=310,
+        )
+        refresh_btn.pack(padx=15, pady=(4, 10))
+
+        ctk.CTkLabel(win, text="Голос ассистента (TTS):",
+                     font=("Segoe UI", 12, "bold")).pack(anchor="w", padx=15, pady=(5, 5))
+
+        voices = self._get_piper_voices()
+        current_voice = self.current_config.get("tts_voice", "ruslan")
+        if current_voice not in voices:
+            voices.insert(0, current_voice)
+
+        voice_menu = ctk.CTkOptionMenu(win, values=voices, width=310)
+        voice_menu.set(current_voice)
+        voice_menu.pack(padx=15, pady=2)
+
+        whisper_switch = ctk.CTkSwitch(win, text="Включить Whisper")
+        if self.current_config.get("use_whisper", False):
+            whisper_switch.select()
+        whisper_switch.pack(anchor="w", padx=20, pady=15)
+
+        def save_and_close():
+            self.current_config["llm_model"] = model_menu.get().strip()
+            self.current_config["tts_voice"] = voice_menu.get().strip()
+            self.current_config["use_whisper"] = bool(whisper_switch.get())
+            try:
+                with open(self.config_path, "w", encoding="utf-8") as f:
+                    json.dump(self.current_config, f, indent=2, ensure_ascii=False)
+                self.status_label.configure(text="Настройки сохранены")
             except Exception as e:
-                self.log_view.insert("0.0", f"Ошибка чтения лога: {e}")
-        else:
-            self.log_view.insert("0.0", "Журнал пуст.")
+                self.status_label.configure(text=f"Ошибка: {e}")
+                return
+            self._close_settings()
 
-        self.log_view.configure(state="disabled")
-        self.log_view.see("end")
+        btn_frame = ctk.CTkFrame(win, fg_color="transparent")
+        btn_frame.pack(pady=10)
+        ctk.CTkButton(btn_frame, text="Сохранить", command=save_and_close,
+                      fg_color="#2b7337", hover_color="#399648", width=140).pack(side="left", padx=5)
+        ctk.CTkButton(btn_frame, text="Отмена", command=self._close_settings,
+                      fg_color="#444", hover_color="#555", width=140).pack(side="left", padx=5)
 
-    def append_to_log(self, sender: str, text: str):
+        win.protocol("WM_DELETE_WINDOW", self._close_settings)
+
+    def _close_settings(self):
+        if self._settings_win is not None:
+            try:
+                self._settings_win.grab_release()
+                self._settings_win.destroy()
+            except Exception:
+                pass
+            self._settings_win = None
+
+    def append_to_log(self, sender, text):
         self.chat_log.configure(state="normal")
-        self.chat_log.insert("end", f"\n {sender}: {text}")
+        self.chat_log.insert("end", f"\n{sender}: {text}")
         self.chat_log.configure(state="disabled")
         self.chat_log.see("end")
 
-    def send_text_command(self, event):
+    def send_text_command(self, event=None):
         text = self.entry.get().strip()
         if text:
             self.append_to_log("Вы", text)
             self.entry.delete(0, "end")
             self.status_label.configure(text="Феникс думает...")
             self.indicator.configure(fg_color="#ff9000")
-            # Передаем команду во внешний обработчик (из gui_worker)
             self.on_command_cb(text)
 
     def check_queue(self):
@@ -172,27 +209,68 @@ class PhoenixGUI(ctk.CTk):
             while True:
                 sender, text = gui_queue.get_nowait()
                 self.append_to_log(sender, text)
-                self.status_label.configure(text="Система готова к работе, сэр")
-                self.indicator.configure(fg_color="#1f538d")
-                self.refresh_log_view()
+                self.status_label.configure(text="Система готова")
+                if self.mic_switch.get():
+                    self.indicator.configure(fg_color="#1f538d", border_color="#00d2ff")
+                else:
+                    self.indicator.configure(fg_color="#333333", border_color="#666666")
         except queue.Empty:
             pass
         self.after(100, self.check_queue)
 
+    def _toggle_mic(self):
+        enabled = bool(self.mic_switch.get())
+        if self.on_mic_toggle_cb:
+            try:
+                self.on_mic_toggle_cb(enabled)
+            except Exception as e:
+                self.status_label.configure(text=f"Ошибка микрофона: {e}")
+                return
+        if enabled:
+            self.status_label.configure(text="Микрофон включён, слушаю...")
+            self.indicator.configure(fg_color="#1f538d", border_color="#00d2ff")
+        else:
+            self.status_label.configure(text="Микрофон выключен")
+            self.indicator.configure(fg_color="#333333", border_color="#666666")
 
-def _copy_log_selection(self, event=None):
-    """Копирует выделенный текст журнала в буфер обмена."""
-    try:
-        text = self.log_view.get("sel.first", "sel.last")
-        if text:
-            self.clipboard_clear()
-            self.clipboard_append(text)
-    except Exception:
-        pass  # ничего не выделено — молча игнорируем
-    return "break"  # событие обработано, дальше не передаём
+    def _sync_mic_state(self):
+        core_state = bool(getattr(self.jarvis, "listening_enabled", True))
+        if core_state != bool(self.mic_switch.get()):
+            if core_state:
+                self.mic_switch.select()
+                self.status_label.configure(text="Микрофон включён, слушаю...")
+                self.indicator.configure(fg_color="#1f538d", border_color="#00d2ff")
+            else:
+                self.mic_switch.deselect()
+                self.status_label.configure(text="Микрофон выключен")
+                self.indicator.configure(fg_color="#333333", border_color="#666666")
+        self.after(500, self._sync_mic_state)
 
+    def _get_ollama_models(self):
+        """Запрашивает у Ollama список установленных моделей."""
+        try:
+            import urllib.request
+            url = self.current_config.get("ollama_url", "http://127.0.0.1:11434").rstrip("/")
+            with urllib.request.urlopen(url + "/api/tags", timeout=3) as r:
+                data = json.loads(r.read())
+            return sorted(m["name"] for m in data.get("models", []) if m.get("name"))
+        except Exception as e:
+            print(f"[settings] Ollama недоступна: {e}")  # для отладки в консоли
+            return []
 
-def _select_all_log(self, event=None):
-    """Выделяет весь текст журнала (Ctrl+A)."""
-    self.log_view.tag_add("sel", "1.0", "end-1c")
-    return "break"
+    def _get_piper_voices(self):
+        """Известные русские голоса Piper. Список можно расширить."""
+        return ["ruslan", "dmitri", "irina", "denis"]
+
+    def _refresh_models(self, model_menu):
+        """Перечитывает список моделей из Ollama и обновляет выпадающий список."""
+        models = self._get_ollama_models()
+        current = model_menu.get()
+        if current and current not in models:
+            models.insert(0, current)
+        if not models:
+            self.status_label.configure(text="Ollama недоступна")
+            return
+        model_menu.configure(values=models)
+        model_menu.set(current if current in models else models[0])
+        self.status_label.configure(text=f"Найдено моделей: {len(models)}")

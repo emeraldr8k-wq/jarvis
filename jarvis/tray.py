@@ -21,7 +21,7 @@ def _make_icon_image() -> Image.Image:
     return img
 
 
-def build_tray(jarvis) -> pystray.Icon:
+def build_tray(jarvis, on_quit=None) -> pystray.Icon:
     def on_toggle(icon, item):
         jarvis.listening_enabled = not jarvis.listening_enabled
         log.info("Прослушивание: %s", jarvis.listening_enabled)
@@ -38,6 +38,11 @@ def build_tray(jarvis) -> pystray.Icon:
     def on_exit(icon, item):
         jarvis.shutdown()
         icon.stop()
+        if on_quit is not None:
+            try:
+                on_quit()
+            except Exception:
+                log.exception("Ошибка в on_quit трея")
 
     menu = pystray.Menu(
         pystray.MenuItem(f"{APP_NAME} v{__version__}", None, enabled=False),
