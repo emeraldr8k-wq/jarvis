@@ -47,7 +47,7 @@ CHAT_SYSTEM = (
 
 class Brain:
     def __init__(self, model: str = "qwen2.5:1.5b-instruct",
-                 url: str = "http://127.0.0.1:11434", timeout: float = 20.0):
+                 url: str = "http://127.0.0.1:11434", timeout: float = 90.0):
         self.model = model
         self.url = url.rstrip("/")
         self.timeout = timeout

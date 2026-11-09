@@ -29,6 +29,11 @@ def project_dir() -> Path:
 
 
 def find_pythonw() -> str:
+    # Ищем pythonw.exe строго внутри нашего локального виртуального окружения venv
+    local_path = Path(__file__).resolve().parent / "venv" / "Scripts" / "pythonw.exe"
+    if local_path.exists():
+        return str(local_path)
+
     for name in ("pythonw.exe", "pythonw"):
         found = shutil.which(name)
         if found:

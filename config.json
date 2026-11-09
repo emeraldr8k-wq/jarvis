@@ -1,5 +1,15 @@
 {
-  "wake_words": ["феникс", "финикс", "феникса", "fenix", "phoenix", "джарвис", "jarvis"],
+  "wake_words": [
+    "феникс",
+    "финикс",
+    "феникса",
+    "fenix",
+    "phoenix",
+    "джарвис",
+    "jarvis",
+    "фен",
+    "винкс"
+  ],
   "tts_backend": "auto",
   "xtts_ref": "voices/jarvis.wav",
   "tts_voice": "ruslan",
@@ -12,16 +22,19 @@
   "input_device": null,
   "mic_check_sec": 20,
   "command_window_sec": 8,
-  "use_whisper": true,
-  "whisper_model": "auto",
+  "use_whisper": false,
+  "whisper_model": "none",
   "whisper_device": "auto",
   "use_llm": true,
-  "llm_model": "qwen2.5:1.5b-instruct",
+  "llm_model": "qwen2.5:1.5b",
   "ollama_url": "http://127.0.0.1:11434",
   "app_paths": {},
   "custom_commands": [
     {
-      "phrases": ["запусти игру", "врубай катку"],
+      "phrases": [
+        "запусти игру",
+        "врубай катку"
+      ],
       "action": "steam://rungameid/570",
       "reply": "Запускаю Доту. Удачной игры."
     }
